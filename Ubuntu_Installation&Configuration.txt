@@ -1,0 +1,213 @@
+# Write a bash script to automate the installation and configuration of a web server 
+# on a fresh Ubuntu 20.04 server. The script should do the following: 
+#       Install Nginx, PHP, and MySQL server. 
+#       Configure Nginx to serve a sample PHP application. 
+#       Secure the server by setting up a firewall for nginx and OpenSSH and configuring SSH access through 
+#       public key only. 
+#       Create a user with sudo access and disable root login. 
+ 
+#Your script should take the following command line arguments: 
+#   --domain: the domain name to be used for the SSL certificate and Nginx server name 
+#   --email: the email address to be used for Let's Encrypt certificate registration 
+#   --db-user: the username for the MySQL database 
+#   --db-pass: the password for the MySQL database
+#   For every argument you can also consider using an abbreviation. (ex. --domain and -d) 
+ 
+#Your script should also generate a strong random password for the user with sudo access. 
+#Your script should output the following information: 
+#The server's public IP address 
+#The MySQL root password
+#The sudo user's username and password 
+ 
+#Your script should be idempotent, meaning that it can be run multiple times without causing any issues or errors.
+#Your script should be able to handle errors that may occur and also implement logging. 
+#Your script should also include error handling and logging, with appropriate messages for each step of the
+#installation process. 
+
+#You can assume that all the configuration files are in their default location on an Ubuntu server. 
+ 
+#You can assume that the server has a fresh installation of Ubuntu 20.04 and has internet access. 
+
+#You should not use any third-party tools or services, such as AWS or Docker. 
+ 
+#The following packets need to be installed after an update: nginx, php-fpm, php-mysql, mysql-server.  
+ 
+#Please also consider configuring nginx. The actual configuration does not matter but show how you would
+#modified/remove/add something to a configuration file. 
+
+
+
+# For me, the task wasnt very clear. I need to store the domain, for the ssl certificate and email for lets encrypt
+# I can only assume that I also have to do get the SSL certificate and the certificate registration. Right?
+
+#                                                ^
+#                                                |
+#                                                |
+
+
+#!/bin/bash
+
+# Update packages.
+sudo apt update &>> "setup.log"
+
+# Set up log file and function
+touch "setup.log"
+
+# Define log function with error handling (prints both to the console and to the log file - for easier debugging, as
+# I dont need to keep heading back to the log file to see what worked and what didnt work. The console output 
+# can be deleted after the final version of the program )
+
+log() {
+  local DATE=$(date +"%Y-%m-%d %T")
+    if [ "$@" >> "setup.log" 2>&1 ]; then
+        echo "[$DATE] Successfully ran command: $*";
+        echo "[$DATE] Successfully ran command: $*" >> "setup.log";
+    else
+        echo "[$DATE] ERROR: Failed to run command: $*" >&2;
+        echo "[$DATE] ERROR: Failed to run command: $*" >> "setup.log";
+        exit 1
+    fi
+}
+
+#Take command line arguments
+if [ $# -ne 4 ]; then
+  echo "Usage: $0 <domain> <email> <db-user> <db-pass>"
+  exit 1
+fi
+
+DOM=$1
+email=$2
+db_u=$3
+db_p=$4
+
+#Check command line arguments
+
+# Domain
+while [[ -z "$DOM" || ! "$DOM" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; do
+log "Invalid domain. Please try again."
+exit 1
+done
+
+# Email
+while [[ -z "$email" || ! "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$ ]]; do
+log "Invalid email address. Please try again."
+exit 1
+done
+
+# Create a new user with sudo access and disable root login
+log "Creating a new user with sudo access and disabling root login..."
+
+# Check if the user already exists
+if [ id "TestUser" >/dev/null 2>&1 ]; then
+    log "The sudo user 'TestUser' already exists."
+
+else
+    # Create a user with sudo access and disable root login
+    sudo adduser TestUser
+    sudo usermod -aG sudo TestUser
+    sudo passwd -l root
+    log "Username TestUser created."
+
+    # Generate a strong random password for the user with sudo access
+    # Define the character set for the password
+    charset='!@#$%^&*()_+{}|:<>?-=[]\;,./abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890'
+
+    # Generate a random password of length 16 with the characters defined above
+    password=$(head /dev/urandom | tr -dc "$charset" | head -c 16)
+    log "Password for user: $password"
+fi
+
+# Check if UFW is already allowing OpenSSH
+if echo "y" | sudo ufw status | grep "OpenSSH" | grep "ALLOW" >/dev/null; then
+    log "UFW is already allowing OpenSSH."
+#else
+    # Allow OpenSSH through UFW
+   #log sudo ufw allow OpenSSH
+fi
+
+# Create SSH key directory and authorized_keys file
+if [ -d "/home/TestUser/.ssh" ]; then
+    log "The SSH directory already exists."
+else
+    # Create SSH directory
+    mkdir -p /home/TestUser/.ssh
+    chmod 700 /home/TestUser/.ssh
+    log "Created .ssh directory."
+
+    # Create authorized_keys file
+    touch /home/TestUser/.ssh/authorized_keys
+    chmod 600 /home/TestUser/.ssh/authorized_keys
+    if [ -d "/home/TestUser/.ssh" ]; then 
+        # Display success message
+        log "SSH access through public key only has been configured successfully."
+    fi
+fi
+
+log "Installing Nginx, PHP, and MySQL server..."
+sudo apt install -y nginx php-fpm php-mysql mysql-server &>> "setup.log"
+
+# Configure firewall for nginx
+log "Configuring firewall for nginx..."
+
+# Enable the firewall
+ufw enable
+
+# Set up firewall rules
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 'Nginx Full'
+
+# Check the firewall status
+echo 'y' | ufw status &>> "setup.log"
+
+echo "$password" | sudo su TestUser
+
+# Configure Nginx to serve a sample PHP application (also change the name)
+log "Configuring Nginx to serve a sample PHP application..."
+rm /etc/nginx/sites-enabled/default &>> "setup.log"
+tee /etc/nginx/sites-enabled/sample-app &>> "setup.log" <<EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    root /var/www/sample-app;
+    index index.php index.html index.htm;
+
+    server_name $DOM;
+
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php7.4-fpm.sock;
+    }
+}
+EOF
+mkdir -p /var/www/sample-app &>> "setup.log"
+tee /var/www/sample-app/index.php &>> "setup.log" <<EOF
+<?php
+phpinfo();
+EOF
+log "Reload nginx."
+sudo systemctl reload nginx &>> "setup.log"
+
+#Change root user to db_u and secure MySQL server by setting the root password to db_p
+log "Changing username and password of the root user in the database..."
+mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${db_p}' AS '${db_u}'; FLUSH PRIVILEGES;" &>> "setup.log"
+
+#Get the IP_ADDRESS of the server.
+PUBLIC_IP=$(curl -s ifconfig.me)
+
+# Output server information
+echo '\n'
+echo "Script output requirements:'\n'Server public IP address: $PUBLIC_IP"
+echo '\n'
+echo "Server public IP address: $PUBLIC_IP"
+echo "MySQL root password: $db_p"
+echo "Sudo user username: TestUser"
+echo "Sudo user password: $password"
+
+#Restart SSH service
+sudo systemctl restart ssh.service &>> "setup.log"
