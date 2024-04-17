@@ -33,17 +33,7 @@
 #The following packets need to be installed after an update: nginx, php-fpm, php-mysql, mysql-server.  
  
 #Please also consider configuring nginx. The actual configuration does not matter but show how you would
-#modified/remove/add something to a configuration file. 
-
-
-
-# For me, the task wasnt very clear. I need to store the domain, for the ssl certificate and email for lets encrypt
-# I can only assume that I also have to do get the SSL certificate and the certificate registration. Right?
-
-#                                                ^
-#                                                |
-#                                                |
-
+#modified/remove/add something to a configuration file.
 
 #!/bin/bash
 
